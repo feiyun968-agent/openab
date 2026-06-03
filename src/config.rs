@@ -81,6 +81,56 @@ pub struct Config {
     pub markdown: MarkdownConfig,
     #[serde(default)]
     pub cron: CronConfig,
+    #[serde(default)]
+    pub hooks: HooksConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct HooksConfig {
+    pub pre_boot: Option<HookConfig>,
+    pub pre_shutdown: Option<HookConfig>,
+}
+
+/// Failure policy for a hook.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OnFailure {
+    #[default]
+    Abort,
+    Warn,
+}
+
+impl<'de> Deserialize<'de> for OnFailure {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.to_lowercase().as_str() {
+            "abort" => Ok(Self::Abort),
+            "warn" => Ok(Self::Warn),
+            other => Err(serde::de::Error::unknown_variant(other, &["abort", "warn"])),
+        }
+    }
+}
+
+/// Configuration for a single hook. Exactly one of `script`, `inline`, or `url` must be set.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HookConfig {
+    /// Absolute path to an executable script.
+    pub script: Option<String>,
+    /// Inline script content (written to temp file and executed).
+    pub inline: Option<String>,
+    /// Remote script URL (fetched and executed).
+    pub url: Option<String>,
+    /// SHA-256 checksum of the remote script (required with `url`).
+    pub sha256: Option<String>,
+    /// Max wall-clock seconds. Default: 60.
+    #[serde(default = "default_hook_timeout")]
+    pub timeout_seconds: u64,
+    /// Failure policy. Default: abort.
+    #[serde(default)]
+    pub on_failure: OnFailure,
+}
+
+fn default_hook_timeout() -> u64 {
+    60
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -153,6 +203,10 @@ pub struct DiscordConfig {
     /// the allowlist filters further. Empty = allow any bot (mode permitting).
     /// Only relevant when `allow_bot_messages` is `"mentions"` or `"all"`;
     /// ignored when `"off"` since all bot messages are rejected before this check.
+    ///
+    /// **Admission override**: a trusted bot that explicitly @mentions this bot
+    /// bypasses the `allow_bot_messages` mode entirely (treated as human @mention).
+    /// This allows trusted bots to pull this bot into threads regardless of mode.
     #[serde(default)]
     pub trusted_bot_ids: Vec<String>,
     #[serde(default)]

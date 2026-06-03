@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      no_cache:
+        description: 'Build without Docker layer cache'
+        required: false
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -75,6 +80,9 @@ jobs:
           - { suffix: "-hermes", dockerfile: "Dockerfile.hermes", artifact: "hermes" }
           - { suffix: "-grok", dockerfile: "Dockerfile.grok", artifact: "grok" }
           - { suffix: "-antigravity", dockerfile: "Dockerfile.antigravity", artifact: "antigravity" }
+          - { suffix: "-pi", dockerfile: "Dockerfile.pi", artifact: "pi" }
+          - { suffix: "-native", dockerfile: "Dockerfile.native", artifact: "native" }
+          - { suffix: "-native-sandbox", dockerfile: "openshell/Dockerfile", artifact: "nativesandbox" }
         platform:
           - { os: linux/amd64, runner: ubuntu-latest }
           - { os: linux/arm64, runner: ubuntu-24.04-arm }
@@ -107,8 +115,8 @@ jobs:
           file: ${{ matrix.variant.dockerfile }}
           platforms: ${{ matrix.platform.os }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.variant.suffix }},push-by-digest=true,name-canonical=true,push=${{ inputs.dry_run != true }}
-          cache-from: type=gha,scope=${{ matrix.variant.suffix }}-${{ matrix.platform.os }}
-          cache-to: type=gha,scope=${{ matrix.variant.suffix }}-${{ matrix.platform.os }},mode=max
+          cache-from: ${{ inputs.no_cache != true && format('type=gha,scope={0}-{1}', matrix.variant.suffix, matrix.platform.os) || '' }}
+          cache-to: ${{ inputs.no_cache != true && format('type=gha,scope={0}-{1},mode=max', matrix.variant.suffix, matrix.platform.os) || '' }}
 
       - name: Export digest
         if: inputs.dry_run != true
@@ -141,6 +149,9 @@ jobs:
           - { suffix: "-hermes", artifact: "hermes" }
           - { suffix: "-grok", artifact: "grok" }
           - { suffix: "-antigravity", artifact: "antigravity" }
+          - { suffix: "-pi", artifact: "pi" }
+          - { suffix: "-native", artifact: "native" }
+          - { suffix: "-native-sandbox", artifact: "nativesandbox" }
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -195,6 +206,9 @@ jobs:
           - { suffix: "-hermes" }
           - { suffix: "-grok" }
           - { suffix: "-antigravity" }
+          - { suffix: "-pi" }
+          - { suffix: "-native" }
+          - { suffix: "-native-sandbox" }
     runs-on: ubuntu-latest
     permissions:
       contents: read

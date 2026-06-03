@@ -37,7 +37,7 @@ Discord adapter. Requires a Discord bot token.
 | `allow_all_users` | bool \| omit | auto-detect | `true` = any user; `false` = only `allowed_users`. Omitted = inferred from list. |
 | `allowed_users` | string[] | `[]` | User IDs to allow. Only checked when `allow_all_users` resolves to false. |
 | `allow_bot_messages` | string | `"off"` | `"off"` — ignore all bot messages. `"mentions"` — only process bot messages that @mention this bot. `"all"` — process all bot messages (capped by `max_bot_turns`). |
-| `trusted_bot_ids` | string[] | `[]` | When non-empty, only these bot IDs pass the bot gate. Empty = any bot (mode permitting). Ignored when `allow_bot_messages = "off"`. |
+| `trusted_bot_ids` | string[] | `[]` | When non-empty, only these bot IDs pass the bot gate. Empty = any bot (mode permitting). **Admission override:** a trusted bot that @mentions this bot bypasses `allow_bot_messages` mode entirely (treated as human @mention, can pull bot into threads). |
 | `allow_user_messages` | string | `"involved"` | `"involved"` — reply in threads bot has participated in without @mention; channel messages require @mention; DMs always process. `"mentions"` — always require @mention. `"multibot-mentions"` — like `"involved"`, but require @mention once another bot has posted in the thread. |
 | `allow_dm` | bool | `false` | `true` = respond to Discord DMs; `false` = ignore DMs. `allowed_users` still applies in DMs. Each DM user consumes one session slot. |
 | `max_bot_turns` | u32 | `100` | Max consecutive bot turns per thread before throttling (soft limit). Human message resets the counter. A compiled-in hard cap of 1000 consecutive bot messages is always enforced. |
@@ -95,7 +95,7 @@ The AI agent subprocess that OpenAB spawns to handle messages via ACP.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `command` | string | *required* | Agent binary (e.g. `kiro-cli`, `claude-agent-acp`, `codex`, `gemini`, `copilot`, `opencode`, `cursor-agent`). |
+| `command` | string | *required* | Agent binary (e.g. `kiro-cli`, `claude-agent-acp`, `codex`, `gemini`, `copilot`, `opencode`, `pi-acp`, `cursor-agent`). |
 | `args` | string[] | `[]` | CLI arguments passed to the agent. |
 | `working_dir` | string | `"/tmp"` | Working directory for the agent process. |
 | `env` | map | `{}` | Extra environment variables (e.g. `{ OPENAI_API_KEY = "${OPENAI_API_KEY}" }`). |
@@ -146,6 +146,11 @@ command = "opencode"
 args = ["acp"]
 working_dir = "/home/node"
 
+# Pi Agent
+[agent]
+command = "pi-acp"
+working_dir = "/home/node"
+
 # Cursor Agent
 [agent]
 command = "cursor-agent"
@@ -168,6 +173,53 @@ Session pool settings for managing concurrent agent sessions.
 |-----|------|---------|-------------|
 | `max_sessions` | usize | `10` | Maximum number of concurrent agent sessions. When full, the oldest idle session is suspended (recoverable); if all sessions are busy, new requests are rejected. |
 | `session_ttl_hours` | u64 | `4` | Session time-to-live in hours. Idle sessions are reclaimed after this period. The example config uses `24`. |
+
+---
+
+## `[hooks]`
+
+Lifecycle hooks that run custom scripts at specific points during the container lifecycle. See [hooks.md](hooks.md) for full documentation and examples.
+
+### `[hooks.pre_boot]`
+
+Runs **before** agent pool creation. Use for bootstrapping files, syncing from S3, installing CLIs.
+
+### `[hooks.pre_shutdown]`
+
+Runs **after** pool shutdown on SIGTERM. Use for backing up state, syncing to S3.
+
+Both hooks share the same fields:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `script` | string | — | Absolute path to an executable script. |
+| `inline` | string | — | Script content (written to temp file and executed). |
+| `url` | string | — | Remote script URL (max 1 MiB). |
+| `sha256` | string | — | Required with `url` — hex-encoded SHA-256 checksum. |
+| `timeout_seconds` | u64 | `60` | Max wall-clock seconds before the script is killed. |
+| `on_failure` | string | `"abort"` | `"abort"` exits openab; `"warn"` logs and continues. |
+
+> Exactly one of `script`, `inline`, or `url` must be set. `script` must be an absolute path. `url` requires `sha256`.
+
+```toml
+[hooks.pre_boot]
+inline = '''
+#!/bin/sh
+set -e
+aws s3 sync "$BOOTSTRAP_URI" "$HOME/"
+'''
+timeout_seconds = 120
+on_failure = "abort"
+
+[hooks.pre_shutdown]
+inline = '''
+#!/bin/sh
+aws s3 sync "$HOME/" "s3://$STATE_BUCKET/$TASK_FAMILY/" \
+  --exclude "aws-cli/*" --quiet
+'''
+timeout_seconds = 30
+on_failure = "warn"
+```
 
 ---
 
