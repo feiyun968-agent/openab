@@ -182,10 +182,14 @@ impl SessionPool {
 
         new_conn.initialize().await?;
 
+        let mcp_servers = self.config.acp_mcp_servers()?;
         let mut resumed = false;
         if let Some(ref sid) = saved_session_id {
             if new_conn.supports_load_session {
-                match new_conn.session_load(sid, &self.config.working_dir).await {
+                match new_conn
+                    .session_load(sid, &self.config.working_dir, &mcp_servers)
+                    .await
+                {
                     Ok(()) => {
                         info!(thread_id, session_id = %sid, "session resumed via session/load");
                         resumed = true;
@@ -198,7 +202,9 @@ impl SessionPool {
         }
 
         if !resumed {
-            new_conn.session_new(&self.config.working_dir).await?;
+            new_conn
+                .session_new(&self.config.working_dir, &mcp_servers)
+                .await?;
             // Surface the reset banner both for restored sessions and for stale
             // live entries that died before we could recover a resumable
             // session id. In both cases the caller is continuing after an
@@ -521,14 +527,21 @@ mod tests {
     fn persisted_mapping_can_include_active_and_suspended_sessions() {
         let persisted = HashMap::from([
             ("active-thread".to_string(), "session-active".to_string()),
-            ("suspended-thread".to_string(), "session-suspended".to_string()),
+            (
+                "suspended-thread".to_string(),
+                "session-suspended".to_string(),
+            ),
         ]);
 
-        let serialized = serde_json::to_string_pretty(&persisted).expect("serialize persisted mapping");
+        let serialized =
+            serde_json::to_string_pretty(&persisted).expect("serialize persisted mapping");
         let roundtrip: HashMap<String, String> =
             serde_json::from_str(&serialized).expect("deserialize persisted mapping");
 
-        assert_eq!(roundtrip.get("active-thread"), Some(&"session-active".to_string()));
+        assert_eq!(
+            roundtrip.get("active-thread"),
+            Some(&"session-active".to_string())
+        );
         assert_eq!(
             roundtrip.get("suspended-thread"),
             Some(&"session-suspended".to_string())

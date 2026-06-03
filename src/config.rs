@@ -364,6 +364,94 @@ pub struct AgentConfig {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub inherit_env: Vec<String>,
+    /// MCP servers to register with the ACP agent at session init.
+    #[serde(default)]
+    pub mcp_servers: HashMap<String, McpServerConfig>,
+}
+
+impl AgentConfig {
+    /// Serialize configured MCP servers into the JSON array expected by
+    /// `session/new` and `session/load` ACP payloads.
+    pub fn acp_mcp_servers(&self) -> anyhow::Result<Vec<serde_json::Value>> {
+        let mut servers: Vec<_> = self.mcp_servers.iter().collect();
+        servers.sort_by_key(|(name, _)| *name);
+        servers
+            .into_iter()
+            .map(|(name, cfg)| cfg.to_acp_value(name))
+            .collect()
+    }
+}
+
+/// Configuration for a single MCP server entry under `[agent.mcp_servers]`.
+#[derive(Debug, Deserialize)]
+pub struct McpServerConfig {
+    /// Transport type: `"stdio"` (default), `"http"`, or `"sse"`.
+    #[serde(default, rename = "type")]
+    pub server_type: Option<String>,
+    /// Command to run (required for stdio).
+    pub command: Option<String>,
+    /// Arguments for stdio command.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Server URL (required for http/sse).
+    pub url: Option<String>,
+    /// Environment variables for stdio servers.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// HTTP headers for http/sse servers.
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+}
+
+impl McpServerConfig {
+    fn to_acp_value(&self, name: &str) -> anyhow::Result<serde_json::Value> {
+        anyhow::ensure!(!name.trim().is_empty(), "mcp_servers key cannot be empty");
+        match self
+            .server_type
+            .as_deref()
+            .unwrap_or("stdio")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "stdio" => {
+                let command = self.command.as_deref().unwrap_or("").trim();
+                anyhow::ensure!(
+                    !command.is_empty(),
+                    "agent.mcp_servers.{name}.command is required for stdio servers"
+                );
+                Ok(serde_json::json!({
+                    "name": name,
+                    "command": command,
+                    "args": &self.args,
+                    "env": env_name_value(&self.env),
+                }))
+            }
+            t @ ("http" | "sse") => {
+                let url = self.url.as_deref().unwrap_or("").trim();
+                anyhow::ensure!(
+                    !url.is_empty(),
+                    "agent.mcp_servers.{name}.url is required for {t} servers"
+                );
+                let mut value = serde_json::json!({"name": name, "type": t, "url": url});
+                if !self.headers.is_empty() {
+                    value["headers"] = serde_json::Value::Array(env_name_value(&self.headers));
+                }
+                Ok(value)
+            }
+            other => anyhow::bail!(
+                "agent.mcp_servers.{name}.type must be stdio, http, or sse (got {other})"
+            ),
+        }
+    }
+}
+
+fn env_name_value(map: &HashMap<String, String>) -> Vec<serde_json::Value> {
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by_key(|(k, _)| *k);
+    entries
+        .into_iter()
+        .map(|(k, v)| serde_json::json!({"name": k, "value": expand_env_vars(v)}))
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]

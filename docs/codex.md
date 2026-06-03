@@ -37,6 +37,37 @@ args = []
 working_dir = "/home/node"
 ```
 
+### MCP Servers
+
+To connect Codex to MCP sidecars, add `[[agent.mcp_servers]]` entries. OpenAB
+forwards these to `codex-acp` in the `session/new` and `session/load` payloads.
+
+**Stdio server:**
+
+```toml
+[agent.mcp_servers.my-tool]
+command = "npx"
+args = ["-y", "@my-org/my-mcp-tool"]
+env = { API_KEY = "${MY_TOOL_API_KEY}" }
+```
+
+**Streamable HTTP server:**
+
+```toml
+[agent.mcp_servers.gdrive]
+type = "http"
+url = "http://127.0.0.1:3140/mcp"
+```
+
+**SSE server:**
+
+```toml
+[agent.mcp_servers.my-sse-tool]
+type = "sse"
+url = "http://127.0.0.1:3141/sse"
+headers = { Authorization = "Bearer ${MY_SSE_TOKEN}" }
+```
+
 ## Authentication
 
 ```bash
