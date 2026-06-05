@@ -1,9 +1,7 @@
 name: PR Watch — Upstream Activity Notify
 
 on:
-  schedule:
-    - cron: '0 */4 * * *'
-  workflow_dispatch:
+  workflow_dispatch:  # disabled: re-enable schedule when ready to monitor a new PR
 
 jobs:
   watch:
