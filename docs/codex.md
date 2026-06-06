@@ -39,7 +39,7 @@ working_dir = "/home/node"
 
 ### MCP Servers
 
-To connect Codex to MCP sidecars, add `[[agent.mcp_servers]]` entries. OpenAB
+To connect Codex to MCP sidecars, add `[agent.mcp_servers.<name>]` entries. OpenAB
 forwards these to `codex-acp` in the `session/new` and `session/load` payloads.
 
 **Stdio server:**

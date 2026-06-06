@@ -432,11 +432,12 @@ impl McpServerConfig {
                     !url.is_empty(),
                     "agent.mcp_servers.{name}.url is required for {t} servers"
                 );
-                let mut value = serde_json::json!({"name": name, "type": t, "url": url});
-                if !self.headers.is_empty() {
-                    value["headers"] = serde_json::Value::Array(env_name_value(&self.headers));
-                }
-                Ok(value)
+                Ok(serde_json::json!({
+                    "name": name,
+                    "type": t,
+                    "url": url,
+                    "headers": env_name_value(&self.headers),
+                }))
             }
             other => anyhow::bail!(
                 "agent.mcp_servers.{name}.type must be stdio, http, or sse (got {other})"
@@ -859,6 +860,133 @@ command = "echo"
         let cfg = parse_config(toml, "test").unwrap();
         assert_eq!(cfg.discord.unwrap().bot_token, "secret-bot-token");
         std::env::remove_var("AB_TEST_TOKEN");
+    }
+
+    #[test]
+    fn acp_mcp_servers_defaults_to_empty() {
+        let cfg = parse_config(MINIMAL_TOML, "test").unwrap();
+        let servers = cfg.agent.acp_mcp_servers().unwrap();
+        assert!(servers.is_empty());
+    }
+
+    #[test]
+    fn acp_mcp_servers_serializes_stdio() {
+        std::env::set_var("AB_MCP_TOKEN", "stdio-secret");
+        let toml = r#"
+[agent]
+command = "codex-acp"
+
+[agent.mcp_servers.fs]
+command = "npx"
+args = ["-y", "@example/fs"]
+env = { API_TOKEN = "${AB_MCP_TOKEN}" }
+"#;
+        let cfg = parse_config(toml, "test").unwrap();
+        let servers = cfg.agent.acp_mcp_servers().unwrap();
+        std::env::remove_var("AB_MCP_TOKEN");
+
+        assert_eq!(
+            servers,
+            vec![serde_json::json!({
+                "name": "fs",
+                "command": "npx",
+                "args": ["-y", "@example/fs"],
+                "env": [{"name": "API_TOKEN", "value": "stdio-secret"}],
+            })]
+        );
+    }
+
+    #[test]
+    fn acp_mcp_servers_serializes_http_with_empty_headers() {
+        let toml = r#"
+[agent]
+command = "codex-acp"
+
+[agent.mcp_servers.gdrive]
+type = "http"
+url = "http://127.0.0.1:3140/mcp"
+"#;
+        let cfg = parse_config(toml, "test").unwrap();
+        let servers = cfg.agent.acp_mcp_servers().unwrap();
+
+        assert_eq!(
+            servers,
+            vec![serde_json::json!({
+                "name": "gdrive",
+                "type": "http",
+                "url": "http://127.0.0.1:3140/mcp",
+                "headers": [],
+            })]
+        );
+    }
+
+    #[test]
+    fn acp_mcp_servers_serializes_sse_headers_with_env_expansion() {
+        std::env::set_var("AB_SSE_TOKEN", "sse-secret");
+        let toml = r#"
+[agent]
+command = "codex-acp"
+
+[agent.mcp_servers.events]
+type = "sse"
+url = "http://127.0.0.1:3141/sse"
+headers = { Authorization = "Bearer ${AB_SSE_TOKEN}" }
+"#;
+        let cfg = parse_config(toml, "test").unwrap();
+        let servers = cfg.agent.acp_mcp_servers().unwrap();
+        std::env::remove_var("AB_SSE_TOKEN");
+
+        assert_eq!(
+            servers,
+            vec![serde_json::json!({
+                "name": "events",
+                "type": "sse",
+                "url": "http://127.0.0.1:3141/sse",
+                "headers": [{"name": "Authorization", "value": "Bearer sse-secret"}],
+            })]
+        );
+    }
+
+    #[test]
+    fn acp_mcp_servers_rejects_missing_stdio_command() {
+        let toml = r#"
+[agent]
+command = "codex-acp"
+
+[agent.mcp_servers.fs]
+"#;
+        let cfg = parse_config(toml, "test").unwrap();
+        let err = cfg.agent.acp_mcp_servers().unwrap_err().to_string();
+        assert!(err.contains("agent.mcp_servers.fs.command is required"));
+    }
+
+    #[test]
+    fn acp_mcp_servers_rejects_missing_http_url() {
+        let toml = r#"
+[agent]
+command = "codex-acp"
+
+[agent.mcp_servers.gdrive]
+type = "http"
+"#;
+        let cfg = parse_config(toml, "test").unwrap();
+        let err = cfg.agent.acp_mcp_servers().unwrap_err().to_string();
+        assert!(err.contains("agent.mcp_servers.gdrive.url is required"));
+    }
+
+    #[test]
+    fn acp_mcp_servers_rejects_invalid_type() {
+        let toml = r#"
+[agent]
+command = "codex-acp"
+
+[agent.mcp_servers.tool]
+type = "websocket"
+url = "ws://127.0.0.1:3141"
+"#;
+        let cfg = parse_config(toml, "test").unwrap();
+        let err = cfg.agent.acp_mcp_servers().unwrap_err().to_string();
+        assert!(err.contains("must be stdio, http, or sse"));
     }
 
     #[test]
